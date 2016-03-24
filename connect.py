@@ -3,6 +3,7 @@ import getpass
 import re
 import time
 import socket
+import types
 
 class paramiko_shell(object):
     def __init__(self, host, username, password):
@@ -82,13 +83,34 @@ class paramiko_shell(object):
 
 class procurve(paramiko_shell):
     class _contextmanager(object):
-        def __init__(self, switch, context):
+        context = []
+        switch = None
+
+        def __init__(self, switch, context, *args):
             self.switch = switch
-            self.context = context
+            self.args = args
+            if isinstance(context, basestring):
+                self.context = [(context, args)]
+            elif isinstance(context, list):
+                if args:
+                    context[-1] = (context[-1][0], args)
+                self.context = context
+
+        def __getattr__(self, attr):
+            return self.switch.context(self.context + [(attr, ())])
+
+        def __call__(self, *args):
+            return self.switch.context(self.context, *args)
+
         def __enter__(self):
-            self.switch.enter(self.context)
+            print "entering %r"%self.context
+            for context, args in self.context:
+                self.switch.enter(context, *args)
+            return self.switch
+
         def __exit__(self, exc_type, exc_value, exc_tb):
-            self.switch.exit()
+            for context, args in self.context:
+                self.switch.exit()
             return False
 
     def __init__(self, host, username, password):
@@ -121,23 +143,33 @@ class procurve(paramiko_shell):
         context = '(%s)' % context[-1] if context else ''
         return ''.join([self.ps1, context, delim, self.ps2])
 
+    def __getattr__(self, attr):
+        def _wrapper(*args):
+            return self.cmd(' '.join([attr] + list(args)))
+        return _wrapper
+
     def cmd(self, command):
         self.send(command+'\n')
         return self.recv_until(self.prompt)
 
     @property
     def config(self):
-        return self.cmd('show config');
+        return self._contextmanager(self, 'config')
 
-    def context(self, context):
-        return self._contextmanager(self, context)
+    def context(self, context, *args):
+        return self._contextmanager(self, context, *args)
 
-    def enter(self, context):
+    @property
+    def root_context(self):
+        return self._contextmanager(self, [])
+
+    def enter(self, context, *args):
         '''
         enter a context, and push it to the context stack
         '''
-        self.stack.append('-'.join(context.split(' ')))
-        self.cmd(context)
+        cmd = map(str, context.split(' ') + list(args))
+        self.stack.append('-'.join(cmd))
+        self.cmd(' '.join(cmd))
 
     def exit(self):
         '''
