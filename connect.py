@@ -4,6 +4,7 @@ import re
 import time
 import socket
 import types
+import string
 
 class paramiko_shell(object):
     def __init__(self, host, username, password):
@@ -171,8 +172,28 @@ class procurve(paramiko_shell):
         return ''.join([self.ps1, slug, delim, self.ps2])
 
     def __getattr__(self, attr):
-        def _wrapper(*args):
-            return self.cmd(' '.join([attr] + list(args)))
+        def _wrapper(*args, **kwargs):
+            def _magictr(arg):
+                # There are no commands that contain an underscore
+                # character, so we use magic underscore to dash
+                # translation to be able to use those.
+                # This also seems sane, since it enforces PEP 8
+                # compatibility:
+                # > Function names should be lowercase, with words
+                # > separated by underscores as necessary to improve
+                # > readability.
+                return arg.translate(string.maketrans('_','-'))
+            return self.cmd(' '.join(
+                        [_magictr(attr)]
+                        + map(str, list(args))
+                        + reduce(
+                            lambda x,y: x+y,
+                            [
+                                [_magictr(k),v]
+                                for k,v in kwargs.items()
+                            ]
+                            )
+                        ))
         return _wrapper
 
     def cmd(self, command):
