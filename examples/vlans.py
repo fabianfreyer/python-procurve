@@ -1,4 +1,5 @@
 from connect import procurve
+import getpass
 
 password = getpass.getpass()
 switch = procurve('switch.example.com', 'admin', password)
