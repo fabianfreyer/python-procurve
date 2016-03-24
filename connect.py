@@ -81,7 +81,26 @@ class paramiko_shell(object):
     def send(self, data):
         self.conn.send(data)
 
+class passthrudict(dict):
+    '''
+    A dict that returns the key as the value when
+    the key is missing. Useful for mappings that only
+    differ from the identity mapping in a finite number
+    of cases.
+    '''
+    def __missing__(self, key):
+        return key
+
 class procurve(paramiko_shell):
+    # Some of the slugs in the context line in the prompt aren't equal
+    # to the commands used to enter the context.
+    # For example:
+    # switch(config)# interface 1
+    # switch(eth-1)#
+    context_slugs = passthrudict({
+            'interface': 'eth'
+            })
+
     class _contextmanager(object):
         context = []
         switch = None
@@ -130,7 +149,7 @@ class procurve(paramiko_shell):
         # Parse the prompt and set up the context stack
         self.stack = []
         if '#' in prompt:
-            self.stack.append('enable')
+            self.stack.append(('enable',()))
         self.ps1, self.ps2 = re.split('[$#]', prompt, 1)
 
     @property
@@ -138,10 +157,18 @@ class procurve(paramiko_shell):
         '''
         Construct the prompt from the current context
         '''
-        delim = '#' if 'enable' in self.stack else '$'
-        context = [i for i in self.stack if i!='enable']
-        context = '(%s)' % context[-1] if context else ''
-        return ''.join([self.ps1, context, delim, self.ps2])
+        delim = '#' if ('enable',()) in self.stack else '$'
+        # Filter out enable from the stack, since this dosn't get
+        # displayed in the slug
+        context = [i for i in self.stack if i[0]!='enable']
+        slug = ''
+        if context:
+            c,args = context[-1]
+            slug = '(%s-%s)' % (
+                    self.context_slugs[c],
+                    '-'.join(list(map(str, args)))
+                    ) if args else '(%s)' % self.context_slugs[c]
+        return ''.join([self.ps1, slug, delim, self.ps2])
 
     def __getattr__(self, attr):
         def _wrapper(*args):
@@ -168,7 +195,7 @@ class procurve(paramiko_shell):
         enter a context, and push it to the context stack
         '''
         cmd = map(str, context.split(' ') + list(args))
-        self.stack.append('-'.join(cmd))
+        self.stack.append((context, args))
         self.cmd(' '.join(cmd))
 
     def exit(self):
